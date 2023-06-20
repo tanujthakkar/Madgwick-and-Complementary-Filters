@@ -164,7 +164,32 @@ def accelerometer(imu_data):
         roll = np.arctan2(imu_data[i,2], np.sqrt(imu_data[i,1]**2 + imu_data[i,3]**2))
         pitch = np.arctan2(-imu_data[i,1], np.sqrt(imu_data[i,2]**2 + imu_data[i,3]**2))
         yaw = np.arctan2(np.sqrt(imu_data[i,1]**2 + imu_data[i,2]**2), imu_data[i,3])
-        w_t = [roll, pitch, yaw]
+        w_t = np.array([roll, pitch, yaw])
+        w = np.insert(w, w.shape[0], np.hstack((imu_data[i,0], w_t)), axis=0)
+        t += dt
+
+    return w
+
+def complementary_filter(imu_data, alpha=0.2, beta=0.8, gamma=0.6):
+    t = 0  # initial time
+    w_t_a = np.array([0, 0, 0], dtype=np.float64)  # accel attitude estimate at time t
+    w_t_g = np.array([0, 0, 0], dtype=np.float64)  # gyro attitude estimate at time t
+    w_t = np.array([0, 0, 0])  # attitude estimate at time t
+    w = np.zeros((0, 4))  # attitude estimates
+
+    for i in range(1, len(imu_data)):
+        dt = imu_data[i,0] - imu_data[i-1,0]
+        roll = np.arctan2(imu_data[i,2], np.sqrt(imu_data[i,1]**2 + imu_data[i,3]**2))
+        pitch = np.arctan2(-imu_data[i,1], np.sqrt(imu_data[i,2]**2 + imu_data[i,3]**2))
+        yaw = np.arctan2(np.sqrt(imu_data[i,1]**2 + imu_data[i,2]**2), imu_data[i,3])
+        w_a = np.array([roll, pitch, yaw])
+        w_t_a = (1 - alpha) * w_a  + alpha * w_t_a  # low pass filter
+
+        w_g = (imu_data[i,4:7]) * dt
+        w_t_g += (1 - beta) * w_t_g + (1 - beta) * (w_g - w_t_g)  # high pass filter
+        
+        # Weighted sum of gyro and accelerometer
+        w_t = ((1 - gamma) * (w_t + w_t_g)) + (gamma * w_t_a)
         w = np.insert(w, w.shape[0], np.hstack((imu_data[i,0], w_t)), axis=0)
         t += dt
 
@@ -196,26 +221,30 @@ def main():
 
     w_gyro = gyroscopic(imu_data)  # estimate attitude using gyroscopic model
     w_accel = accelerometer(imu_data)  # estimate attitude using accelerometer model
+    w_complementary = complementary_filter(imu_data)  # estimate attitude using complementary filter
 
     if PLOT:
         fig = plt.figure()
-        plt.legend()
 
         ax_roll = fig.add_subplot(311)
         ax_roll.plot(w_gyro[:,0], w_gyro[:,1], label='Gyro')
         ax_roll.plot(w_accel[:,0], w_accel[:,1], label='Accel')
+        ax_roll.plot(w_complementary[:,0], w_complementary[:,1], label='Complementary')
         ax_roll.plot(gt_data[:,0], gt_data[:,1], label='Vicon')
         ax_roll.set_title('Roll')
+        plt.legend()
 
         ax_pitch = fig.add_subplot(312)
         ax_pitch.plot(w_gyro[:,0], w_gyro[:,2], label='Gyro')
         ax_pitch.plot(w_accel[:,0], w_accel[:,2], label='Accel')
+        ax_pitch.plot(w_complementary[:,0], w_complementary[:,2], label='Complementary')
         ax_pitch.plot(gt_data[:,0], gt_data[:,2], label='Vicon')
         ax_pitch.set_title('Pitch')
 
         ax_yaw = fig.add_subplot(313)
         ax_yaw.plot(w_gyro[:,0], w_gyro[:,3], label='Gyro')
         ax_yaw.plot(w_accel[:,0], w_accel[:,3], label='Accel')
+        ax_yaw.plot(w_complementary[:,0], w_complementary[:,3], label='Complementary')
         ax_yaw.plot(gt_data[:,0], gt_data[:,3], label='Vicon')
         ax_yaw.set_title('Yaw')
 
@@ -224,19 +253,21 @@ def main():
 
     if VISUALIZE:
         fig = plt.figure()
-        ax_gyro = fig.add_subplot(131, projection='3d')
-        ax_accel = fig.add_subplot(132, projection='3d')
-        ax_gt = fig.add_subplot(133, projection='3d')
+        ax_gyro = fig.add_subplot(141, projection='3d')
+        ax_accel = fig.add_subplot(142, projection='3d')
+        ax_comp = fig.add_subplot(143, projection='3d')
+        ax_gt = fig.add_subplot(144, projection='3d')
 
         plt.ion()
         plt.show()
-        for i, s in enumerate(gt_data):
+        for i in range(0, len(gt_data), 10):
             ax_gyro.clear()
             ax_accel.clear()
+            ax_comp.clear()
             ax_gt.clear()
 
             # Print timestamp on plot
-            ax_gt.text2D(0.05, 0.95, "t = %.3f" % (s[0] - gt_data[0][0]), transform=ax_gyro.transAxes)
+            ax_gt.text2D(0.05, 0.95, "t = %.3f" % (gt_data[i][0] - gt_data[0][0]), transform=ax_gyro.transAxes)
             rot_mat_gyro = euler_to_rot_mat(w_gyro[i][1:4])
             rotplot(rot_mat_gyro, ax_gyro)
             ax_gyro.set_title("Gyroscopic")
@@ -244,6 +275,10 @@ def main():
             rot_mat_accel = euler_to_rot_mat(w_accel[i][1:4])
             rotplot(rot_mat_accel, ax_accel)
             ax_accel.set_title("Accelerometer")
+
+            rot_mat_comp = euler_to_rot_mat(w_complementary[i][1:4])
+            rotplot(rot_mat_comp, ax_comp)
+            ax_comp.set_title("Complementary")
 
             rot_mat_gt = euler_to_rot_mat(gt_data[i][1:4])
             rotplot(rot_mat_gt, ax_gt)
