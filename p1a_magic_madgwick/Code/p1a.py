@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 plt.switch_backend('TkAgg')
 from scipy import io
+import tf
 import time
 
 from rotplot import rotplot
@@ -141,6 +142,63 @@ def euler_to_rot_mat(euler):
 
     return R
 
+def euler_to_quat(euler):
+    """Convert euler angles to quaternion.
+    
+    Args:
+        euler: euler angles
+
+    Returns:
+        q: quaternion
+    """
+
+    roll, pitch, yaw = euler
+
+    q = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
+    q = np.array([q[3], q[0], q[1], q[2]])
+
+    return q
+
+def quat_to_euler(q):
+    """Convert quaternion to euler angles.
+    
+    Args:
+        q: quaternion
+
+    Returns:
+        euler: euler angles
+    """
+
+    # q = np.array([q[1], q[2], q[3], q[0]])
+    # euler = tf.transformations.euler_from_quaternion(q)
+    # euler = np.array([euler[0], euler[1], euler[2]])
+
+    qw, qx, qy, qz = q
+
+    # Convert quaternion to rotation matrix
+    R = np.array([[1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
+                  [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
+                  [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]])
+
+    # Extract Euler angles from rotation matrix
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    pitch = np.arctan2(-R[2, 0], np.sqrt(R[2, 1]**2 + R[2, 2]**2))
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+
+    euler = np.array([roll, pitch, yaw])
+
+    return euler
+
+def quaternion_multiply(q1, q2):
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    q_product = np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                          w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                          w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                          w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+
+    return q_product
+
 def gyroscopic(imu_data):
     t = 0  # initial time
     w_t = [0, 0, 0]  # attitude estimate at time t
@@ -195,6 +253,44 @@ def complementary_filter(imu_data, alpha=0.2, beta=0.8, gamma=0.6):
 
     return w
 
+def madgwick_filter(imu_data, beta=0.01):
+
+    def f_grad(q, a):
+        f = np.array([2*(q[1]*q[3] - q[0]*q[2]) - a[0],
+                      2*(q[0]*q[1] + q[2]*q[3]) - a[1],
+                      2*(0.5 - q[1]**2 - q[2]**2) - a[2]])
+        
+        J = [[-2*q[2], 2*q[3], -2*q[0], 2*q[1]],
+             [2*q[1], 2*q[0], 2*q[3], 2*q[2]],
+             [0, -4*q[1], -4*q[2], 0]]
+        J = np.array(J)
+        grad = np.dot(J.T, f)
+
+        return f, grad
+
+    t = 0  # initial time
+    w_t = np.array([1, 0, 0, 0], dtype=np.float64)  # attitude estimate at time t
+    w = np.zeros((0, 4))  # attitude estimates
+
+    for i in range(1, len(imu_data)):
+        dt = imu_data[i,0] - imu_data[i-1,0]
+
+        # Accelerometer increment
+        f, grad = f_grad(w_t, imu_data[i,1:4])
+        w_a = -beta * (grad / np.linalg.norm(f))
+
+        # Gyroscope increment
+        w_t_norm = w_t / np.linalg.norm(w_t)
+        w_g = 0.5 * quaternion_multiply(w_t_norm, np.hstack((0, imu_data[i,4:7])))
+
+        # Attitude increment
+        w_t += (w_g + w_a) * dt
+        euler = quat_to_euler(w_t)
+        w = np.insert(w, w.shape[0], np.hstack((imu_data[i,0], euler)), axis=0)
+        t += dt
+    
+    return w
+
 def main():
     
     parser = argparse.ArgumentParser()
@@ -222,6 +318,7 @@ def main():
     w_gyro = gyroscopic(imu_data)  # estimate attitude using gyroscopic model
     w_accel = accelerometer(imu_data)  # estimate attitude using accelerometer model
     w_complementary = complementary_filter(imu_data)  # estimate attitude using complementary filter
+    w_madgwick = madgwick_filter(imu_data, 0.05)  # estimate attitude using madgwick filter
 
     if PLOT:
         fig = plt.figure()
@@ -230,33 +327,38 @@ def main():
         ax_roll.plot(w_gyro[:,0], w_gyro[:,1], label='Gyro')
         ax_roll.plot(w_accel[:,0], w_accel[:,1], label='Accel')
         ax_roll.plot(w_complementary[:,0], w_complementary[:,1], label='Complementary')
+        ax_roll.plot(w_madgwick[:,0], w_madgwick[:,1], label='Madgwick')
         ax_roll.plot(gt_data[:,0], gt_data[:,1], label='Vicon')
-        ax_roll.set_title('Roll')
-        plt.legend()
+        ax_roll.set_ylabel('Roll (rad)')
+        plt.legend(loc='upper right')
 
         ax_pitch = fig.add_subplot(312)
         ax_pitch.plot(w_gyro[:,0], w_gyro[:,2], label='Gyro')
         ax_pitch.plot(w_accel[:,0], w_accel[:,2], label='Accel')
         ax_pitch.plot(w_complementary[:,0], w_complementary[:,2], label='Complementary')
+        ax_pitch.plot(w_madgwick[:,0], w_madgwick[:,2], label='Madgwick')
         ax_pitch.plot(gt_data[:,0], gt_data[:,2], label='Vicon')
-        ax_pitch.set_title('Pitch')
+        ax_pitch.set_ylabel('Pitch (rad)')
 
         ax_yaw = fig.add_subplot(313)
         ax_yaw.plot(w_gyro[:,0], w_gyro[:,3], label='Gyro')
         ax_yaw.plot(w_accel[:,0], w_accel[:,3], label='Accel')
         ax_yaw.plot(w_complementary[:,0], w_complementary[:,3], label='Complementary')
+        ax_yaw.plot(w_madgwick[:,0], w_madgwick[:,3], label='Madgwick')
         ax_yaw.plot(gt_data[:,0], gt_data[:,3], label='Vicon')
-        ax_yaw.set_title('Yaw')
+        ax_yaw.set_ylabel('Yaw (rad)')
+        ax_yaw.set_xlabel('Time (s)')
 
         plt.show()
 
 
     if VISUALIZE:
         fig = plt.figure()
-        ax_gyro = fig.add_subplot(141, projection='3d')
-        ax_accel = fig.add_subplot(142, projection='3d')
-        ax_comp = fig.add_subplot(143, projection='3d')
-        ax_gt = fig.add_subplot(144, projection='3d')
+        ax_gyro = fig.add_subplot(151, projection='3d')
+        ax_accel = fig.add_subplot(152, projection='3d')
+        ax_comp = fig.add_subplot(153, projection='3d')
+        ax_madgwick = fig.add_subplot(154, projection='3d')
+        ax_gt = fig.add_subplot(155, projection='3d')
 
         plt.ion()
         plt.show()
@@ -264,13 +366,14 @@ def main():
             ax_gyro.clear()
             ax_accel.clear()
             ax_comp.clear()
+            ax_madgwick.clear()
             ax_gt.clear()
 
             # Print timestamp on plot
             ax_gt.text2D(0.05, 0.95, "t = %.3f" % (gt_data[i][0] - gt_data[0][0]), transform=ax_gyro.transAxes)
             rot_mat_gyro = euler_to_rot_mat(w_gyro[i][1:4])
             rotplot(rot_mat_gyro, ax_gyro)
-            ax_gyro.set_title("Gyroscopic")
+            ax_gyro.set_title("Gyroscope")
 
             rot_mat_accel = euler_to_rot_mat(w_accel[i][1:4])
             rotplot(rot_mat_accel, ax_accel)
@@ -279,6 +382,10 @@ def main():
             rot_mat_comp = euler_to_rot_mat(w_complementary[i][1:4])
             rotplot(rot_mat_comp, ax_comp)
             ax_comp.set_title("Complementary")
+
+            rot_mat_madgwick = euler_to_rot_mat(w_madgwick[i][1:4])
+            rotplot(rot_mat_madgwick, ax_madgwick)
+            ax_madgwick.set_title("Madgwick")
 
             rot_mat_gt = euler_to_rot_mat(gt_data[i][1:4])
             rotplot(rot_mat_gt, ax_gt)
