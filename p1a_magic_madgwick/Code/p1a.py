@@ -3,9 +3,12 @@
 import os
 import argparse
 import numpy as np
-
 from matplotlib import pyplot as plt
+plt.switch_backend('TkAgg')
 from scipy import io
+import time
+
+from rotplot import rotplot
 
 np.set_printoptions(threshold=np.inf, linewidth=150)
 
@@ -76,7 +79,7 @@ def calculate_gyro_bias(imu_data, n):
     return gyro_bias
 
 def rot_mat_to_euler(R):
-    """Convert rotation matrix to euler angles.
+    """Convert rotation matrix to Z-Y-X euler angles.
 
     Args:
         R: rotation matrix
@@ -89,27 +92,55 @@ def rot_mat_to_euler(R):
 
     singular = sy < 1e-6
 
-    if  not singular :
-        x = np.arctan2(R[2,1] , R[2,2])
-        y = np.arctan2(-R[2,0], sy)
-        z = np.arctan2(R[1,0], R[0,0])
-    else :
-        x = np.arctan2(-R[1,2], R[1,1])
-        y = np.arctan2(-R[2,0], sy)
-        z = 0
+    if not singular:
+        roll = np.arctan2(R[2,1] , R[2,2])
+        pitch = np.arctan2(-R[2,0], np.sqrt(R[2,1]**2 + R[2,2]**2))
+        yaw = np.arctan2(R[1,0], R[0,0])
+    else:
+        roll = np.arctan2(-R[1,2], R[1,1])
+        pitch = np.arctan2(-R[2,0], sy)
+        yaw = 0
 
-    euler = np.array([x, y, z])
+    euler = np.array([roll, pitch, yaw])
 
     return euler
+
+def euler_to_rot_mat(euler):
+    """Convert euler angles to rotation matrix.
+
+    Args:
+        euler: euler angles
+    
+    Returns:
+        R: rotation matrix
+    """
+
+    roll, pitch, yaw = euler
+
+    Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0],
+                   [np.sin(yaw), np.cos(yaw), 0],
+                   [0, 0, 1]])
+    
+    Ry = np.array([[np.cos(pitch), 0, np.sin(pitch)],
+                   [0, 1, 0],
+                   [-np.sin(pitch), 0, np.cos(pitch)]])
+    
+    Rx = np.array([[1, 0, 0],
+                   [0, np.cos(roll), -np.sin(roll)],
+                   [0, np.sin(roll), np.cos(roll)]])
+
+    R = np.dot(np.dot(Rz, Ry), Rx)
+
+    return R
 
 def main():
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--imu_data', help='path to imu data', required=True)
     parser.add_argument('--imu_params', help='path to imu parameters', required=True)
-    parser.add_argument('--output', help='path to output file')
     parser.add_argument('--gyro_bias_n', help='number of initial samples to use for gyro bias estimation')
     parser.add_argument('--gt_data', help='path to ground truth data')
+    parser.add_argument('--output', help='path to output file')
     parser.add_argument('--plot', help='plot results', action='store_true')
 
     args = parser.parse_args()
@@ -120,26 +151,23 @@ def main():
     GT_DATA = args.gt_data
     PLOT = args.plot
 
-    imu_data, imu_params, gt_data = load_data(IMU_DATA, IMU_PARAMS, GT_DATA)
-    print(imu_params)
-    # print(gt_data)
+    imu_data, imu_params, gt_data = load_data(IMU_DATA, IMU_PARAMS, GT_DATA)  # load data
 
-    imu_data = preprocess_data(imu_data, imu_params)
-    # print(imu_data)
-
-    if GT_DATA is not None:
-        gt_data = preprocess_data(gt_data, imu_params)
-        print(gt_data)
+    imu_data = preprocess_data(imu_data, imu_params)  # convert to SI units
 
     if PLOT:
-        plt.plot(imu_data[0], imu_data[1])
-        plt.plot(imu_data[0], imu_data[2])
-        plt.plot(imu_data[0], imu_data[3])
-        plt.plot(imu_data[0], imu_data[4])
-        plt.plot(imu_data[0], imu_data[5])
-        plt.plot(imu_data[0], imu_data[6])
-        plt.legend(['ax', 'ay', 'az', 'wx', 'wy', 'wz'])
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        plt.ion()
         plt.show()
+        for i, s in enumerate(gt_data):
+            ax.clear()
+            # Print timestamp on plot
+            ax.text2D(0.05, 0.95, "t = %.3f" % (s[0] - gt_data[0][0]), transform=ax.transAxes)
+            rot_mat = euler_to_rot_mat(gt_data[i][1:4])
+            rotplot(rot_mat, ax)
+            plt.draw()
+            plt.pause(0.001)
 
 if __name__ == '__main__':
     main()
