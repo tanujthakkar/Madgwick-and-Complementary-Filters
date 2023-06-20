@@ -154,6 +154,22 @@ def gyroscopic(imu_data):
 
     return w
 
+def accelerometer(imu_data):
+    t = 0  # initial time
+    w_t = [0, 0, 0]  # attitude estimate at time t
+    w = np.zeros((0, 4))  # attitude estimates
+
+    for i in range(1, len(imu_data)):
+        dt = imu_data[i,0] - imu_data[i-1,0]
+        roll = np.arctan2(imu_data[i,2], np.sqrt(imu_data[i,1]**2 + imu_data[i,3]**2))
+        pitch = np.arctan2(-imu_data[i,1], np.sqrt(imu_data[i,2]**2 + imu_data[i,3]**2))
+        yaw = np.arctan2(np.sqrt(imu_data[i,1]**2 + imu_data[i,2]**2), imu_data[i,3])
+        w_t = [roll, pitch, yaw]
+        w = np.insert(w, w.shape[0], np.hstack((imu_data[i,0], w_t)), axis=0)
+        t += dt
+
+    return w
+
 def main():
     
     parser = argparse.ArgumentParser()
@@ -177,16 +193,19 @@ def main():
     imu_data, gyro_bias = preprocess_data(imu_data, imu_params)  # convert to SI units
 
     w_gyro = gyroscopic(imu_data)  # estimate attitude using gyroscopic model
+    w_accel = accelerometer(imu_data)  # estimate attitude using accelerometer model
 
     if PLOT:
         fig = plt.figure()
-        ax_gyro = fig.add_subplot(121, projection='3d')
-        ax_gt = fig.add_subplot(122, projection='3d')
+        ax_gyro = fig.add_subplot(131, projection='3d')
+        ax_accel = fig.add_subplot(132, projection='3d')
+        ax_gt = fig.add_subplot(133, projection='3d')
 
         plt.ion()
         plt.show()
         for i, s in enumerate(gt_data):
             ax_gyro.clear()
+            ax_accel.clear()
             ax_gt.clear()
 
             # Print timestamp on plot
@@ -194,6 +213,10 @@ def main():
             rot_mat_gyro = euler_to_rot_mat(w_gyro[i][1:4])
             rotplot(rot_mat_gyro, ax_gyro)
             ax_gyro.set_title("Gyroscopic")
+
+            rot_mat_accel = euler_to_rot_mat(w_accel[i][1:4])
+            rotplot(rot_mat_accel, ax_accel)
+            ax_accel.set_title("Accelerometer")
 
             rot_mat_gt = euler_to_rot_mat(gt_data[i][1:4])
             rotplot(rot_mat_gt, ax_gt)
