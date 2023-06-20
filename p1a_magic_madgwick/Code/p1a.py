@@ -51,7 +51,7 @@ def preprocess_data(imu_data, imu_params, gyro_bias_n=200):
         imu_data: imu data
     """
 
-    imu_data[:, 0] -= imu_data[0, 0]
+    # imu_data[:, 0] -= imu_data[0, 0]
 
     # convert to SI units
     imu_data[:,1] = 9.81*(imu_data[:,1]*imu_params[0,0] + imu_params[1,0])
@@ -59,9 +59,17 @@ def preprocess_data(imu_data, imu_params, gyro_bias_n=200):
     imu_data[:,3] = 9.81*(imu_data[:,3]*imu_params[0,2] + imu_params[1,2])
 
     gyro_bias = calculate_gyro_bias(imu_data, gyro_bias_n)
-    imu_data[:,4:7] = (3300/1023) * (np.pi/180) * 0.3 * (imu_data[:,4:7] - gyro_bias)
+    w = (3300/1023) * (np.pi/180) * 0.3 * (imu_data[:,4:7] - gyro_bias)
 
-    return imu_data
+    # Change order to roll, pitch, yaw
+    imu_data[:,4] = w[:,1]
+    imu_data[:,5] = w[:,2]
+    imu_data[:,6] = w[:,0]
+
+    # Fix gyro bias order
+    gyro_bias = gyro_bias[[1,2,0]]
+
+    return imu_data, gyro_bias
 
 def calculate_gyro_bias(imu_data, n):
     """Calculate gyro bias.
@@ -133,6 +141,19 @@ def euler_to_rot_mat(euler):
 
     return R
 
+def gyroscopic(imu_data):
+    t = 0  # initial time
+    w_t = [0, 0, 0]  # attitude estimate at time t
+    w = np.zeros((0, 4))  # attitude estimates
+
+    for i in range(1, len(imu_data)):
+        dt = imu_data[i,0] - imu_data[i-1,0]
+        w_t += (imu_data[i,4:7]) * dt
+        w = np.insert(w, w.shape[0], np.hstack((imu_data[i,0], w_t)), axis=0)
+        t += dt
+
+    return w
+
 def main():
     
     parser = argparse.ArgumentParser()
@@ -153,19 +174,33 @@ def main():
 
     imu_data, imu_params, gt_data = load_data(IMU_DATA, IMU_PARAMS, GT_DATA)  # load data
 
-    imu_data = preprocess_data(imu_data, imu_params)  # convert to SI units
+    imu_data, gyro_bias = preprocess_data(imu_data, imu_params)  # convert to SI units
+
+    w_gyro = gyroscopic(imu_data)  # estimate attitude using gyroscopic model
 
     if PLOT:
         fig = plt.figure()
-        ax = fig.add_subplot(projection='3d')
+        ax_gyro = fig.add_subplot(121, projection='3d')
+        ax_gt = fig.add_subplot(122, projection='3d')
+
         plt.ion()
         plt.show()
         for i, s in enumerate(gt_data):
-            ax.clear()
+            ax_gyro.clear()
+            ax_gt.clear()
+
             # Print timestamp on plot
-            ax.text2D(0.05, 0.95, "t = %.3f" % (s[0] - gt_data[0][0]), transform=ax.transAxes)
-            rot_mat = euler_to_rot_mat(gt_data[i][1:4])
-            rotplot(rot_mat, ax)
+            ax_gt.text2D(0.05, 0.95, "t = %.3f" % (s[0] - gt_data[0][0]), transform=ax_gyro.transAxes)
+            rot_mat_gyro = euler_to_rot_mat(w_gyro[i][1:4])
+            rotplot(rot_mat_gyro, ax_gyro)
+            ax_gyro.set_title("Gyroscopic")
+
+            rot_mat_gt = euler_to_rot_mat(gt_data[i][1:4])
+            rotplot(rot_mat_gt, ax_gt)
+            ax_gt.set_title("Ground Truth")
+
+            plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95)
+
             plt.draw()
             plt.pause(0.001)
 
