@@ -179,6 +179,7 @@ def main():
     parser.add_argument('--gt_data', help='path to ground truth data')
     parser.add_argument('--output', help='path to output file')
     parser.add_argument('--plot', help='plot results', action='store_true')
+    parser.add_argument('--visualize', help='visualize results', action='store_true')
 
     args = parser.parse_args()
     IMU_DATA = args.imu_data
@@ -187,6 +188,7 @@ def main():
     GYRO_BIAS_N = args.gyro_bias_n
     GT_DATA = args.gt_data
     PLOT = args.plot
+    VISUALIZE = args.visualize
 
     imu_data, imu_params, gt_data = load_data(IMU_DATA, IMU_PARAMS, GT_DATA)  # load data
 
@@ -196,6 +198,31 @@ def main():
     w_accel = accelerometer(imu_data)  # estimate attitude using accelerometer model
 
     if PLOT:
+        fig = plt.figure()
+        plt.legend()
+
+        ax_roll = fig.add_subplot(311)
+        ax_roll.plot(w_gyro[:,0], w_gyro[:,1], label='Gyro')
+        ax_roll.plot(w_accel[:,0], w_accel[:,1], label='Accel')
+        ax_roll.plot(gt_data[:,0], gt_data[:,1], label='Vicon')
+        ax_roll.set_title('Roll')
+
+        ax_pitch = fig.add_subplot(312)
+        ax_pitch.plot(w_gyro[:,0], w_gyro[:,2], label='Gyro')
+        ax_pitch.plot(w_accel[:,0], w_accel[:,2], label='Accel')
+        ax_pitch.plot(gt_data[:,0], gt_data[:,2], label='Vicon')
+        ax_pitch.set_title('Pitch')
+
+        ax_yaw = fig.add_subplot(313)
+        ax_yaw.plot(w_gyro[:,0], w_gyro[:,3], label='Gyro')
+        ax_yaw.plot(w_accel[:,0], w_accel[:,3], label='Accel')
+        ax_yaw.plot(gt_data[:,0], gt_data[:,3], label='Vicon')
+        ax_yaw.set_title('Yaw')
+
+        plt.show()
+
+
+    if VISUALIZE:
         fig = plt.figure()
         ax_gyro = fig.add_subplot(131, projection='3d')
         ax_accel = fig.add_subplot(132, projection='3d')
@@ -220,7 +247,7 @@ def main():
 
             rot_mat_gt = euler_to_rot_mat(gt_data[i][1:4])
             rotplot(rot_mat_gt, ax_gt)
-            ax_gt.set_title("Ground Truth")
+            ax_gt.set_title("Vicon")
 
             plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95)
 
