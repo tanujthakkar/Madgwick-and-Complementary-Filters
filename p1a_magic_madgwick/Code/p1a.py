@@ -3,8 +3,10 @@
 import os
 import argparse
 import numpy as np
+import matplotlib
 from matplotlib import pyplot as plt
-plt.switch_backend('TkAgg')
+from matplotlib.animation import FuncAnimation
+# matplotlib.use('TkAgg')
 from scipy import io
 import tf
 import time
@@ -321,34 +323,63 @@ def main():
     w_madgwick = madgwick_filter(imu_data, 0.05)  # estimate attitude using madgwick filter
 
     if PLOT:
-        fig = plt.figure()
+        # Create figure and subplots
+        fig, (ax_roll, ax_pitch, ax_yaw) = plt.subplots(3, 1, sharex=True)
 
-        ax_roll = fig.add_subplot(311)
-        ax_roll.plot(w_gyro[:,0], w_gyro[:,1], label='Gyro')
-        ax_roll.plot(w_accel[:,0], w_accel[:,1], label='Accel')
-        ax_roll.plot(w_complementary[:,0], w_complementary[:,1], label='Complementary')
-        ax_roll.plot(w_madgwick[:,0], w_madgwick[:,1], label='Madgwick')
-        ax_roll.plot(gt_data[:,0], gt_data[:,1], label='Vicon')
+        # Set up the initial plot
         ax_roll.set_ylabel('Roll (rad)')
-        plt.legend(loc='upper right')
-
-        ax_pitch = fig.add_subplot(312)
-        ax_pitch.plot(w_gyro[:,0], w_gyro[:,2], label='Gyro')
-        ax_pitch.plot(w_accel[:,0], w_accel[:,2], label='Accel')
-        ax_pitch.plot(w_complementary[:,0], w_complementary[:,2], label='Complementary')
-        ax_pitch.plot(w_madgwick[:,0], w_madgwick[:,2], label='Madgwick')
-        ax_pitch.plot(gt_data[:,0], gt_data[:,2], label='Vicon')
         ax_pitch.set_ylabel('Pitch (rad)')
-
-        ax_yaw = fig.add_subplot(313)
-        ax_yaw.plot(w_gyro[:,0], w_gyro[:,3], label='Gyro')
-        ax_yaw.plot(w_accel[:,0], w_accel[:,3], label='Accel')
-        ax_yaw.plot(w_complementary[:,0], w_complementary[:,3], label='Complementary')
-        ax_yaw.plot(w_madgwick[:,0], w_madgwick[:,3], label='Madgwick')
-        ax_yaw.plot(gt_data[:,0], gt_data[:,3], label='Vicon')
         ax_yaw.set_ylabel('Yaw (rad)')
         ax_yaw.set_xlabel('Time (s)')
+            
+        # Set the limits for each subplot
+        roll_min = np.min([np.min(w_gyro[:, 1]), np.min(w_accel[:, 1]), np.min(w_complementary[:, 1]), np.min(w_madgwick[:, 1]), np.min(gt_data[:, 1])])
+        roll_max = np.max([np.max(w_gyro[:, 1]), np.max(w_accel[:, 1]), np.max(w_complementary[:, 1]), np.max(w_madgwick[:, 1]), np.max(gt_data[:, 1])])
+        ax_roll.set_ylim(0, np.max(gt_data[:, 0]))
+        ax_roll.set_ylim(roll_min, roll_max)
 
+        pitch_min = np.min([np.min(w_gyro[:, 2]), np.min(w_accel[:, 2]), np.min(w_complementary[:, 2]), np.min(w_madgwick[:, 2]), np.min(gt_data[:, 2])])
+        pitch_max = np.max([np.max(w_gyro[:, 2]), np.max(w_accel[:, 2]), np.max(w_complementary[:, 2]), np.max(w_madgwick[:, 2]), np.max(gt_data[:, 2])])
+        ax_pitch.set_ylim(0, np.max(gt_data[:, 0]))
+        ax_pitch.set_ylim(pitch_min, pitch_max)
+
+        yaw_min = np.min([np.min(w_gyro[:, 3]), np.min(w_accel[:, 3]), np.min(w_complementary[:, 3]), np.min(w_madgwick[:, 3]), np.min(gt_data[:, 3])])
+        yaw_max = np.max([np.max(w_gyro[:, 3]), np.max(w_accel[:, 3]), np.max(w_complementary[:, 3]), np.max(w_madgwick[:, 3]), np.max(gt_data[:, 3])])
+        ax_yaw.set_ylim(0, np.max(gt_data[:, 0]))
+        ax_yaw.set_ylim(yaw_min, yaw_max)
+
+        # Define the update function for animation
+        def update(frame):
+            if frame % 10 != 0:
+                return
+
+            ax_roll.plot(gt_data[:frame,0], w_gyro[:frame,1], color='r')
+            ax_roll.plot(gt_data[:frame,0], w_accel[:frame,1], color='b')
+            ax_roll.plot(gt_data[:frame,0], w_complementary[:frame,1], color='k')
+            ax_roll.plot(gt_data[:frame,0], w_madgwick[:frame,1], color='y')
+            ax_roll.plot(gt_data[:frame,0], gt_data[:frame,1], color='g')
+
+            ax_pitch.plot(gt_data[:frame,0], w_gyro[:frame,2], color='r')
+            ax_pitch.plot(gt_data[:frame,0], w_accel[:frame,2], color='b')
+            ax_pitch.plot(gt_data[:frame,0], w_complementary[:frame,2], color='k')
+            ax_pitch.plot(gt_data[:frame,0], w_madgwick[:frame,2], color='y')
+            ax_pitch.plot(gt_data[:frame,0], gt_data[:frame,2], color='g')
+
+            ax_yaw.plot(gt_data[:frame,0], w_gyro[:frame,3], color='r')
+            ax_yaw.plot(gt_data[:frame,0], w_accel[:frame,3], color='b')
+            ax_yaw.plot(gt_data[:frame,0], w_complementary[:frame,3], color='k')
+            ax_yaw.plot(gt_data[:frame,0], w_madgwick[:frame,3], color='y')
+            ax_yaw.plot(gt_data[:frame,0], gt_data[:frame,3], color='g')
+
+        ax_roll.legend(['Gyroscope', 'Accelerometer', 'Complementary', 'Madgwick', 'Vicon'], loc='upper right')
+        # Create the animation
+        animation = FuncAnimation(fig, update, frames=len(gt_data), interval=0)
+
+        # Save the animation
+        # animation.save('gyroscopic.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
+        # animation.save('gyroscopic.gif', writer='imagemagick', fps=30)
+        
+        # Show the plot
         plt.show()
 
 
